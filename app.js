@@ -104,10 +104,10 @@ app.get("/account/balance/:id", (request, response) => {
         }
         var promises = []
         for(var i = 0; i < result.length; i++) {
-            promises.push(Request("https://blockchain.info/q/addressbalance/" + result[i]));
+            promises.push(Request("https://insight.bitpay.com/api/addr/" + result[i]));
         }
         Promise.all(promises).then(result => {
-            var balance = result.reduce((a, b) => parseInt(a) + parseInt(b), 0);
+            var balance = result.reduce((a, b) => a + JSON.parse(b).balanceSat, 0);
             response.send({ "balance": balance });
         }, error => {
             return response.status(500).send(error);
@@ -121,6 +121,85 @@ app.get("/balance/value", (request, response) => {
     }, error => {
         response.status(500).send(error);
     });
+});
+
+app.post("/withdraw", (request, response) => {
+    var model = Joi.object().keys({
+        satoshis: Joi.number().required(),
+        id: Joi.string().required()
+    });
+    Joi.validate(request.body, model, { stripUnknown: true }, (error, value) => {
+        if(error) {
+            return response.status(500).send(error);
+        }
+        var statement = "SELECT SUM(tx.satoshis) AS balance FROM " + bucket._name + " AS tx WHERE tx.type = 'transaction' AND tx.account = $account";
+        var query = Couchbase.N1qlQuery.fromString(statement);
+        bucket.query(query, { "account": value.id }, (error, result) => {
+            if(error) {
+                return response.status(500).send({ "code": error.code, "message": error.message });
+            } else if(result[0].balance == null || (result[0].balance - value.satoshis) < 0) {
+                return response.status(500).send({ "message": "There are not `" + value.satoshis + "` satoshis available for withdrawal" });
+            }
+            var id = UUID.v4();
+            Request("https://api.coinmarketcap.com/v1/ticker/bitcoin/").then(market => {
+                var usd = (Bitcore.Unit.fromSatoshis(value.satoshis).toBTC() * JSON.parse(market)[0].price_usd).toFixed(2);
+                var transaction = {
+                    account: value.id,
+                    satoshis: (value.satoshis * -1),
+                    usd: parseFloat(usd),
+                    timestamp: (new Date()).getTime(),
+                    status: "withdrawal",
+                    type: "transaction"
+                };
+                bucket.insert(id, transaction, (error, result) => {
+                    if(error) {
+                        return response.status(500).send({ "code": error.code, "message": error.message });
+                    }
+                    transaction.id = id;
+                    response.send(transaction);
+                });
+            }, error => {
+                response.status(500).send(error);
+            });
+        });
+    });
+});
+
+app.post("/deposit", (request, response) => {
+    var model = Joi.object().keys({
+        usd: Joi.number().required(),
+        id: Joi.string().required()
+    });
+    Joi.validate(request.body, model, { stripUnknown: true }, (error, value) => {
+        if(error) {
+            return response.status(500).send(error);
+        }
+        var id = UUID.v4();
+        Request("https://api.coinmarketcap.com/v1/ticker/bitcoin/").then(market => {
+            var btc = value.usd / JSON.parse(market)[0].price_usd;
+            var transaction = {
+                account: value.id,
+                usd: value.usd,
+                satoshis: Bitcore.Unit.fromBTC(btc).toSatoshis(),
+                timestamp: (new Date()).getTime(),
+                status: "deposit",
+                type: "transaction"
+            };
+            bucket.insert(id, transaction, (error, result) => {
+                if(error) {
+                    return response.status(500).send({ "code": error.code, "message": error.message });
+                }
+                transaction.id = id;
+                response.send(transaction);
+            });
+        }, error => {
+            response.status(500).send(error);
+        });
+    });
+});
+
+app.post("/transfer", (request, response) => {
+
 });
 
 app.post("/cashout", (request, response) => {
