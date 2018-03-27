@@ -31,6 +31,10 @@ class Helper {
         });
     }
 
+    getAddressBalance(address) {
+        return Request("https://insight.bitpay.com/api/addr/" + address);
+    }
+
     getAddressUtxo(address) {
         return Request("https://insight.bitpay.com/api/addr/" + address + "/utxo").then(utxo => {
             return new Promise((resolve, reject) => {
@@ -100,6 +104,47 @@ class Helper {
         });
     }
 
+    getMasterAddresses() {
+        var addresses = [];
+        var account = this.master.deriveChild(0);
+        for(var i = 1; i <= 10; i++) {
+            addresses.push(account.deriveChild(i).privateKey.toAddress().toString());
+        }
+        return addresses;
+    }
+
+    getMasterKeyPairs() {
+        var keypairs = [];
+        var key;
+        var account = this.master.deriveChild(0);
+        for(var i = 1; i <= 10; i++) {
+            key = account.deriveChild(i);
+            keypairs.push({ "secret": key.privateKey.toWIF().toString(), "address": key.privateKey.toAddress().toString() });
+        }
+        return keypairs;
+    }
+
+    getMasterAddressWithMinimum(addresses, amount) {
+        var promises = [];
+        for(var i = 0; i < addresses.length; i++) {
+            promises.push(Request("https://insight.bitpay.com/api/addr/" + addresses[i]));
+        }
+        return Promise.all(promises).then(result => {
+            for(var i = 0; i < result.length; i++) {
+                if(result[i].balanceSat >= amount) {
+                    return resolve({ "address": result[i].addrStr });
+                }
+            }
+            reject({ "message": "Not enough funds in exchange" });
+        });
+    }
+
+    getMasterChangeAddress() {
+        var account = this.master.deriveChild(0);
+        var key = account.deriveChild(Math.random() * 10 + 1);
+        return { "secret": key.privateKey.toWIF().toString(), "address": key.privateKey.toAddress().toString() }
+    }
+
     getAddresses(account) {
         var statement, params;
         if(account) {
@@ -129,6 +174,68 @@ class Helper {
                 }
                 resolve({ "secret": result[0] });
             });
+        });
+    }
+
+    createTransactionFromAccount(account, source, destination, amount) {
+        return new Promise((resolve, reject) => {
+            this.getAddressBalance(source).then(sourceAddress => {
+                if(sourceAddress.balanceSat < amount) {
+                    return reject({ "message": "Not enough funds in account." });
+                }
+                this.getPrivateKeyFromAddress(account, source).then(keypair => {
+                    this.getAddressUtxo(source).then(utxo => {
+                        var transaction = new Bitcore.Transaction();
+                        for(var i = 0; i < utxo.length; i++) {
+                            transaction.from(utxo[i]);
+                        }
+                        transaction.to(destination, amount);
+                        this.addAddress(account).then(change => {
+                            transaction.change(change.address);
+                            transaction.sign(keypair.secret);
+                            resolve(transaction);
+                        }, error => reject(error));
+                    }, error => reject(error));
+                }, error => reject(error));
+            }, error => reject(error));
+        });
+    }
+
+    createTransactionFromMaster(account, destination, amount) {
+        return new Promise((resolve, reject) => {
+            this.getAccountBalance(account).then(accountBalance => {
+                if(accountBalance.balance < amount) {
+                    reject({ "message": "Not enough funds in account." });
+                }
+                var mKeyPairs = this.getMasterKeyPairs();
+                var masterAddresses = mKeyPairs.map(a => a.address);
+                this.getMasterAddressWithMinimum(masterAddresses, amount).then(funds => {
+                    this.getAddressUtxo(funds.address).then(utxo => {
+                        var transaction = new Bitcore.Transaction();
+                        for(var i = 0; i < utxo.length; i++) {
+                            transaction.from(utxo[i]);
+                        }
+                        transaction.to(destination, amount);
+                        var change = helper.getMasterChangeAddress();
+                        transaction.change(change.address);
+                        for(var j = 0; j < mKeyPairs.length; j ++) {
+                            if(mKeyPairs[j].address == funds.address) {
+                                transaction.sign(mKeyPairs[j].secret);
+                            }
+                        }
+                        var tx = {
+                            account: account,
+                            satoshis: (amount * -1),
+                            timestamp: (new Date()).getTime(),
+                            status: "transfer",
+                            type: "transaction"
+                        };
+                        this.insert(tx).then(result => {
+                            resolve(transaction);
+                        }, error => reject(error));
+                    }, error => reject(error));
+                }, error => reject(error));
+            }, error => reject(error));
         });
     }
 

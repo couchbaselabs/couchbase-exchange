@@ -83,26 +83,19 @@ module.exports = (app) => {
             if(error) {
                 return response.status(500).send(error);
             }
-            helper.getPrivateKeyFromAddress(value.id, value.sourceaddress).then(keypair => {
-                helper.getAddressUtxo(value.sourceaddress).then(utxo => {
-                    var transaction = new Bitcore.Transaction();
-                    for(var i = 0; i < utxo.length; i++) {
-                        transaction.from(utxo[i]);
-                    }
-                    transaction.to(destinationaddress, amount);
-                    helper.addAddress(value.id).then(change => {
-                        transaction.change(change.address);
-                        transaction.sign(keypair.secret);
-                        response.send(transaction);
-                    }, error => {
-                        response.status(500).send(error);
-                    });
+            if(value.sourceaddress) {
+                helper.createTransactionFromAccount(value.id, value.sourceaddress, value.destinationaddress, value.amount).then(result => {
+                    response.send(result);
                 }, error => {
                     response.status(500).send(error);
                 });
-            }, error => {
-                response.status(500).send(error);
-            });
+            } else {
+                helper.createTransactionFromMaster(value.id, value.destinationaddress, value.amount).then(result => {
+                    response.send(result);
+                }, error => {
+                    response.status(500).send(error);
+                });
+            }
         });
     });
 

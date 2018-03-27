@@ -58,4 +58,17 @@ module.exports = (app) => {
         });
     });
 
+    app.get("/address/balance/:id", (request, response) => {
+        helper.getWalletBalance([request.params.id]).then(balance => {
+            response.send(balance);
+        }, error => {
+            response.status(500).send({ "code": error.code, "message": error.message });
+        });
+    });
+
+    app.get("/addresses/master", (request, response) => {
+        var addresses = helper.getMasterAddresses();
+        response.send(addresses);
+    });
+
 }
