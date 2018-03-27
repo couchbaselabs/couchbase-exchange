@@ -66,9 +66,4 @@ module.exports = (app) => {
         });
     });
 
-    app.get("/addresses/master", (request, response) => {
-        var addresses = helper.getMasterAddresses();
-        response.send(addresses);
-    });
-
 }

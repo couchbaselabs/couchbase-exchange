@@ -104,15 +104,6 @@ class Helper {
         });
     }
 
-    getMasterAddresses() {
-        var addresses = [];
-        var account = this.master.deriveChild(0);
-        for(var i = 1; i <= 10; i++) {
-            addresses.push(account.deriveChild(i).privateKey.toAddress().toString());
-        }
-        return addresses;
-    }
-
     getMasterKeyPairs() {
         var keypairs = [];
         var key;
